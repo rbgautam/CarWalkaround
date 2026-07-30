@@ -6,7 +6,9 @@
       "Read(//c/Program Files/Android/Android Studio/jbr/bin/**)",
       "Bash(\"/c/Program Files/Android/Android Studio/jbr/bin/java.exe\" -version)",
       "Read(//c/Program Files/Android/Android Studio/plugins/**)",
-      "Read(//c/Program Files/Android/Android Studio/**)"
+      "Read(//c/Program Files/Android/Android Studio/**)",
+      "Bash(git add *)",
+      "Bash(git commit -q -m ' *)"
     ]
   }
 }

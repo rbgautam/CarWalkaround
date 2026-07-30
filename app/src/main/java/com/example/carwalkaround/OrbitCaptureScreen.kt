@@ -41,6 +41,23 @@ fun OrbitCaptureScreen(
     var activeRecording by remember { mutableStateOf<Recording?>(null) }
     var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
 
+    // Recording.stop() only *requests* finalization; the .mp4 has no moov atom
+    // (and so cannot be read by MediaMetadataRetriever) until VideoRecordEvent
+    // .Finalize arrives. These three hold the gap between those two moments:
+    // the session waiting to be handed off, whether we're in that gap, and any
+    // finalization error to surface instead of handing off a broken file.
+    var pendingSession by remember { mutableStateOf<OrbitSession?>(null) }
+    var isFinalizing by remember { mutableStateOf(false) }
+    var recordingError by remember { mutableStateOf<String?>(null) }
+
+    // A recording outlives this composable unless we stop it. Backing out
+    // mid-orbit would otherwise hold the camera and keep growing the file with
+    // no reachable stop button. pendingSession is null on this path, so the
+    // resulting Finalize event correctly does not trigger a handoff.
+    DisposableEffect(Unit) {
+        onDispose { activeRecording?.stop() }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
 
         // --- Camera preview (CameraX PreviewView wrapped for Compose) ---
@@ -81,15 +98,47 @@ fun OrbitCaptureScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            if (!uiState.isRecording) {
+            recordingError?.let { message ->
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color(0xFFE74C3C)
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            if (isFinalizing) {
+                CircularProgressIndicator(color = Color.White)
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "Finalizing video…",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White
+                )
+            } else if (!uiState.isRecording) {
                 Button(onClick = {
                     val outputFile = File(
                         context.getExternalFilesDir(null),
                         "orbit_${System.currentTimeMillis()}.mp4"
                     )
-                    startRecording(context, videoCapture, outputFile) {
-                        viewModel.onRecordingStarted(outputFile.absolutePath)
-                    }.let { activeRecording = it }
+                    recordingError = null
+                    activeRecording = startRecording(
+                        context = context,
+                        videoCapture = videoCapture,
+                        outputFile = outputFile,
+                        onStarted = { viewModel.onRecordingStarted(outputFile.absolutePath) },
+                        onFinalized = { error ->
+                            isFinalizing = false
+                            activeRecording = null
+                            val session = pendingSession
+                            pendingSession = null
+                            when {
+                                // Only now is the file readable by FrameExtractor.
+                                error == null && session != null -> onSessionFinished(session)
+                                error != null -> recordingError = error
+                            }
+                        }
+                    )
                 }) {
                     Text("Start Orbit Recording")
                 }
@@ -107,9 +156,12 @@ fun OrbitCaptureScreen(
                 if (uiState.isComplete) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Button(onClick = {
+                        // Stop the clock and park the session; the handoff to
+                        // the review screen happens in onFinalized above, once
+                        // the muxer has actually written a readable .mp4.
+                        pendingSession = viewModel.onRecordingStopped()
+                        isFinalizing = true
                         activeRecording?.stop()
-                        val finished = viewModel.onRecordingStopped()
-                        finished?.let(onSessionFinished)
                     }) {
                         Text("Finish & Extract Frames")
                     }
@@ -271,11 +323,19 @@ private fun startCamera(
     }, ContextCompat.getMainExecutor(context))
 }
 
+/**
+ * @param onStarted fires on VideoRecordEvent.Start — the recording clock's zero.
+ * @param onFinalized fires on VideoRecordEvent.Finalize with an error message,
+ *        or null on success. This is the *only* point at which [outputFile] is a
+ *        complete, readable MP4; stop() returning does not imply the file is
+ *        written. Both callbacks arrive on the main executor.
+ */
 private fun startRecording(
     context: Context,
     videoCapture: VideoCapture<Recorder>?,
     outputFile: File,
-    onStarted: () -> Unit
+    onStarted: () -> Unit,
+    onFinalized: (error: String?) -> Unit
 ): Recording? {
     val vc = videoCapture ?: return null
     val outputOptions = FileOutputOptions.Builder(outputFile).build()
@@ -291,7 +351,12 @@ private fun startRecording(
                 is VideoRecordEvent.Start -> onStarted()
                 is VideoRecordEvent.Finalize -> {
                     if (event.hasError()) {
-                        // surface error to UI / logging in a real build
+                        onFinalized(
+                            event.cause?.message
+                                ?: "Recording failed to save (error ${event.error})."
+                        )
+                    } else {
+                        onFinalized(null)
                     }
                 }
                 else -> Unit

@@ -43,8 +43,8 @@ fun ReviewScreen(
     var extracted by remember { mutableStateOf<OrbitSession?>(null) }
 
     LaunchedEffect(session.videoFilePath) {
-        val outputDir = File(context.getExternalFilesDir(null), "frames")
-        extracted = FrameExtractor.extractCheckpointFrames(context, session, outputDir)
+        val outputDir = File(context.getExternalFilesDir(null), "frames/${session.sessionId}")
+        extracted = FrameExtractor.extractCheckpointFrames(session, outputDir)
     }
 
     val done = extracted

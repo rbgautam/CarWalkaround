@@ -16,12 +16,14 @@ object FrameExtractor {
 
     /**
      * @param session the finished OrbitSession, with checkpoints already logged
-     *                (label + timestampMs) during recording.
-     * @param outputDir directory to write extracted frame JPEGs into.
+     *                (label + timestampMs) during recording. The video file must
+     *                already be finalized — see VideoRecordEvent.Finalize.
+     * @param outputDir directory to write extracted frame JPEGs into. Must be
+     *                  session-scoped (see [OrbitSession.sessionId]); frame file
+     *                  names are label-derived and collide across sessions.
      * @return the same session, with each checkpoint's frameUri populated.
      */
     suspend fun extractCheckpointFrames(
-        context: Context,
         session: OrbitSession,
         outputDir: File
     ): OrbitSession = withContext(Dispatchers.IO) {

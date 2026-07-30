@@ -1,5 +1,7 @@
 package com.example.carwalkaround
 
+import java.io.File
+
 /**
  * The 8 exterior labels captured during the continuous orbit walkaround video,
  * in the order the user will naturally walk around the car.
@@ -40,6 +42,15 @@ data class OrbitSession(
     val videoFilePath: String,
     val checkpoints: MutableList<Checkpoint> = mutableListOf()
 ) {
+    /**
+     * Stable per-session identifier, derived from the timestamped video file
+     * name (`orbit_<millis>.mp4` -> `orbit_<millis>`). Extracted frames are
+     * namespaced under this so a second walkaround cannot overwrite the stills
+     * from the first — the label alone is not unique across sessions.
+     */
+    val sessionId: String
+        get() = File(videoFilePath).nameWithoutExtension
+
     val nextLabel: OrbitLabel?
         get() {
             val doneLabels = checkpoints.map { it.label }.toSet()
