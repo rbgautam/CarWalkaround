@@ -47,6 +47,15 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+        jniLibs {
+            // 16 KB page size support: .so files must be stored uncompressed so
+            // the loader can mmap them directly from the APK. This is already
+            // the default for minSdk >= 23, but it is pinned here because a
+            // future minSdk change would silently flip it back and reintroduce
+            // a Play Store compliance failure. AGP 8.5.1+ handles the matching
+            // 16 KB zip alignment automatically (verify: zipalign -c -P 16 4).
+            useLegacyPackaging = false
+        }
     }
 }
 
@@ -67,8 +76,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.4")
 
-    // --- CameraX (versions per project README) ---
-    val cameraxVersion = "1.3.4"
+    // --- CameraX ---
+    val cameraxVersion = "1.4.2"
     implementation("androidx.camera:camera-core:$cameraxVersion")
     implementation("androidx.camera:camera-camera2:$cameraxVersion")
     implementation("androidx.camera:camera-lifecycle:$cameraxVersion")

@@ -300,8 +300,6 @@ private fun startCamera(
         val cameraProvider = cameraProviderFuture.get()
 
         val preview = androidx.camera.core.Preview.Builder().build().also {
-            // CameraX 1.3.4 exposes this as a setter method (the assignable
-            // `surfaceProvider` property arrives in 1.4.0+).
             it.setSurfaceProvider(previewView.surfaceProvider)
         }
 

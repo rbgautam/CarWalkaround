@@ -27,7 +27,10 @@
 
 ```kotlin
 dependencies {
-    val cameraxVersion = "1.3.4"
+    // 1.4.2 or newer is required: CameraX 1.3.4 shipped
+    // libimage_processing_util_jni.so with 4 KB ELF segment alignment, which
+    // fails the 16 KB page size requirement (see "16 KB page sizes" below).
+    val cameraxVersion = "1.4.2"
     implementation("androidx.camera:camera-core:$cameraxVersion")
     implementation("androidx.camera:camera-camera2:$cameraxVersion")
     implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
@@ -50,6 +53,36 @@ dependencies {
 <uses-feature android:name="android.hardware.camera.any" />
 ```
 Request `CAMERA` (and `RECORD_AUDIO` if used) at runtime before showing `OrbitCaptureScreen` — not included in this sketch, use `ActivityResultContracts.RequestPermission()`.
+
+## 16 KB page sizes
+
+Android 15+ devices may use 16 KB memory pages, and Play requires apps
+targeting Android 15 to support them. Compliance is two separate properties:
+
+1. **ELF segment alignment** — every bundled `.so` must have its `LOAD`
+   segments aligned to 16 KB (`p_align = 0x4000`). This is fixed at link time,
+   so for transitive libraries the only lever is the dependency version.
+2. **APK packaging** — `.so` entries must be `Stored` (uncompressed) and 16 KB
+   aligned within the zip, so the loader can map them straight out of the APK.
+
+This app has no NDK code of its own, but it does bundle native libraries
+transitively: `libimage_processing_util_jni.so` and `libsurface_util_jni.so`
+(CameraX), and `libandroidx.graphics.path.so` (Compose UI). Property (2) is
+handled by AGP 8.5.1+ with `useLegacyPackaging = false`. Property (1) is why
+CameraX is pinned to 1.4.2+.
+
+To verify after a dependency change — both checks, not just one:
+
+```bash
+# (1) ELF alignment: every LOAD segment must report 0x4000
+unzip -o app/build/outputs/apk/debug/app-debug.apk -d /tmp/apk
+for so in $(find /tmp/apk/lib -name '*.so'); do
+  echo "$so"; "$ANDROID_NDK/toolchains/llvm/prebuilt/<host>/bin/llvm-readelf" -l "$so" | awk '$1=="LOAD"{print $NF}' | sort -u
+done
+
+# (2) zip alignment: must exit 0
+"$ANDROID_HOME/build-tools/<ver>/zipalign" -c -P 16 4 app/build/outputs/apk/debug/app-debug.apk
+```
 
 ## What's deliberately left out of this sketch (per the phase plan)
 - No ARCore / sensor-based height tracking — the `FramingOverlay` is a static
