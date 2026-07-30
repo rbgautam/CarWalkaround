@@ -48,7 +48,7 @@ fun OrbitCaptureScreen(
     // finalization error to surface instead of handing off a broken file.
     var pendingSession by remember { mutableStateOf<OrbitSession?>(null) }
     var isFinalizing by remember { mutableStateOf(false) }
-    var recordingError by remember { mutableStateOf<String?>(null) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
     // A recording outlives this composable unless we stop it. Backing out
     // mid-orbit would otherwise hold the camera and keep growing the file with
@@ -65,7 +65,13 @@ fun OrbitCaptureScreen(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 val previewView = PreviewView(ctx)
-                startCamera(ctx, lifecycleOwner, previewView) { vc -> videoCapture = vc }
+                startCamera(
+                    context = ctx,
+                    lifecycleOwner = lifecycleOwner,
+                    previewView = previewView,
+                    onVideoCaptureReady = { vc -> videoCapture = vc },
+                    onError = { message -> errorMessage = message }
+                )
                 previewView
             }
         )
@@ -98,7 +104,7 @@ fun OrbitCaptureScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            recordingError?.let { message ->
+            errorMessage?.let { message ->
                 Text(
                     text = message,
                     style = MaterialTheme.typography.bodyMedium,
@@ -121,7 +127,7 @@ fun OrbitCaptureScreen(
                         context.getExternalFilesDir(null),
                         "orbit_${System.currentTimeMillis()}.mp4"
                     )
-                    recordingError = null
+                    errorMessage = null
                     activeRecording = startRecording(
                         context = context,
                         videoCapture = videoCapture,
@@ -135,7 +141,7 @@ fun OrbitCaptureScreen(
                             when {
                                 // Only now is the file readable by FrameExtractor.
                                 error == null && session != null -> onSessionFinished(session)
-                                error != null -> recordingError = error
+                                error != null -> errorMessage = error
                             }
                         }
                     )
@@ -289,35 +295,60 @@ private fun FramingOverlay(modifier: Modifier = Modifier) {
 
 // --- CameraX wiring ---
 
+/**
+ * @param onVideoCaptureReady fires once the camera is bound and recording is possible.
+ * @param onError fires if the camera cannot be configured on this device. Camera
+ *        binding is best-effort — hardware varies — so failures are surfaced to
+ *        the user rather than thrown out of a main-executor callback, where they
+ *        would take the whole process down.
+ */
 private fun startCamera(
     context: Context,
     lifecycleOwner: androidx.lifecycle.LifecycleOwner,
     previewView: PreviewView,
-    onVideoCaptureReady: (VideoCapture<Recorder>) -> Unit
+    onVideoCaptureReady: (VideoCapture<Recorder>) -> Unit,
+    onError: (String) -> Unit
 ) {
     val cameraProviderFuture = androidx.camera.lifecycle.ProcessCameraProvider.getInstance(context)
     cameraProviderFuture.addListener({
-        val cameraProvider = cameraProviderFuture.get()
+        try {
+            val cameraProvider = cameraProviderFuture.get()
 
-        val preview = androidx.camera.core.Preview.Builder().build().also {
-            it.setSurfaceProvider(previewView.surfaceProvider)
-        }
+            val preview = androidx.camera.core.Preview.Builder().build().also {
+                it.setSurfaceProvider(previewView.surfaceProvider)
+            }
 
-        val recorder = Recorder.Builder()
-            .setQualitySelector(
-                androidx.camera.video.QualitySelector.from(androidx.camera.video.Quality.FHD)
+            val recorder = Recorder.Builder()
+                .setQualitySelector(
+                    // FHD is the target, but naming a single quality with no
+                    // fallback makes binding throw outright on any camera that
+                    // cannot supply it. Binding Preview + VideoCapture together
+                    // also routes through stream sharing, which narrows the
+                    // available set further. Degrade instead of crashing.
+                    androidx.camera.video.QualitySelector.fromOrderedList(
+                        listOf(
+                            androidx.camera.video.Quality.FHD,
+                            androidx.camera.video.Quality.HD,
+                            androidx.camera.video.Quality.SD
+                        ),
+                        androidx.camera.video.FallbackStrategy
+                            .lowerQualityOrHigherThan(androidx.camera.video.Quality.SD)
+                    )
+                )
+                .build()
+            val videoCapture = VideoCapture.withOutput(recorder)
+
+            cameraProvider.unbindAll()
+            cameraProvider.bindToLifecycle(
+                lifecycleOwner,
+                CameraSelector.DEFAULT_BACK_CAMERA,
+                preview,
+                videoCapture
             )
-            .build()
-        val videoCapture = VideoCapture.withOutput(recorder)
-
-        cameraProvider.unbindAll()
-        cameraProvider.bindToLifecycle(
-            lifecycleOwner,
-            CameraSelector.DEFAULT_BACK_CAMERA,
-            preview,
-            videoCapture
-        )
-        onVideoCaptureReady(videoCapture)
+            onVideoCaptureReady(videoCapture)
+        } catch (e: Exception) {
+            onError("Camera unavailable: ${e.message ?: e::class.java.simpleName}")
+        }
     }, ContextCompat.getMainExecutor(context))
 }
 
