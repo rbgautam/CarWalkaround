@@ -84,8 +84,20 @@ dependencies {
     implementation("androidx.camera:camera-video:$cameraxVersion")
     implementation("androidx.camera:camera-view:$cameraxVersion")
 
+    // --- On-device OCR for the VIN plate ---
+    // The *bundled* Latin model, not the Play-Services-delivered variant: a
+    // walkaround happens on a lot or in a garage, where the first-run model
+    // download would fail exactly when the app is needed. Costs a few MB of APK
+    // and ships native .so files — see the jniLibs packaging note above, which
+    // is what keeps those 16 KB-page-size compliant.
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+
     // --- Coroutines ---
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    // Bridges ML Kit's Task API to suspend functions. Worth the small artifact:
+    // hand-rolled Task -> continuation wrappers are a reliable way to leak a
+    // continuation when the caller's scope is cancelled mid-recognition.
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
 
     // --- Debug-only tooling for Compose previews / layout inspector ---
     debugImplementation("androidx.compose.ui:ui-tooling")

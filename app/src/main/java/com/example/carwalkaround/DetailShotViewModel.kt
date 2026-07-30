@@ -21,6 +21,9 @@ data class DetailUiState(
     val isRetaking: Boolean = false,
     val errorMessage: String? = null
 ) {
+    val vehicleTag: VehicleTag
+        get() = session.vehicleTag
+
     val stepNumber: Int
         get() = currentLabel?.let { DetailLabel.ORDERED.indexOf(it) + 1 } ?: DetailLabel.ORDERED.size
 
@@ -35,29 +38,33 @@ data class DetailUiState(
  * There is no timestamp logic here (unlike [OrbitCaptureViewModel]) because a
  * detail shot's label is simply the step that was open when it was taken —
  * plan §4 calls this out as the trivial case.
+ *
+ * The state is null until [startNewSession] supplies a [VehicleTag]. That is a
+ * consequence of tagging being mandatory: a [DetailSession] now requires a
+ * vehicle, so there is no honest value to construct at field-initialization
+ * time. The alternative — a placeholder tag — would let untagged photos reach
+ * disk and only fail later, at review or upload, when the capture is over and
+ * the car has driven away.
  */
 class DetailShotViewModel : ViewModel() {
 
-    private val _uiState = MutableStateFlow(
-        DetailUiState(session = DetailSession(sessionId = "details_${System.currentTimeMillis()}"))
-    )
-    val uiState: StateFlow<DetailUiState> = _uiState.asStateFlow()
+    private val _uiState = MutableStateFlow<DetailUiState?>(null)
+    val uiState: StateFlow<DetailUiState?> = _uiState.asStateFlow()
 
     /**
-     * File the next shutter press should write to. Includes [capturedAt] so a
-     * retake never reuses the path of the photo it replaces — the review screen
-     * keys its decoded bitmap on the path, and a reused path would leave the
-     * stale image on screen. The superseded file is deleted in [onShotCaptured].
+     * Begins a pass against [vehicleTag], discarding any previous one. The
+     * ViewModel is activity-scoped and outlives a single walkaround, so without
+     * this a second car would inherit the first car's photos and its
+     * already-complete state. Files from the previous session are left on disk —
+     * they belong to a finished capture log, under that vehicle's own folder.
      */
-    fun outputFileFor(label: DetailLabel, parentDir: File, capturedAt: Long): File {
-        val sessionDir = File(parentDir, "details/${_uiState.value.session.sessionId}")
-        if (!sessionDir.exists()) sessionDir.mkdirs()
-        return File(sessionDir, "${label.name}_$capturedAt.jpg")
+    fun startNewSession(vehicleTag: VehicleTag) {
+        _uiState.value = DetailUiState(session = DetailSession(vehicleTag = vehicleTag))
     }
 
     /** Call once CameraX reports the JPEG is written to disk. */
     fun onShotCaptured(label: DetailLabel, mediaPath: String, capturedAt: Long) {
-        val state = _uiState.value
+        val state = _uiState.value ?: return
 
         // A retake supersedes the previous file; drop it so a session directory
         // does not accumulate every discarded attempt.
@@ -80,7 +87,7 @@ class DetailShotViewModel : ViewModel() {
     }
 
     fun onCaptureFailed(message: String) {
-        _uiState.value = _uiState.value.copy(errorMessage = message)
+        _uiState.value = _uiState.value?.copy(errorMessage = message)
     }
 
     /**
@@ -90,7 +97,7 @@ class DetailShotViewModel : ViewModel() {
      * still missing rather than blocking the user here.
      */
     fun skipCurrentStep() {
-        val state = _uiState.value
+        val state = _uiState.value ?: return
         val current = state.currentLabel ?: return
         val remaining = state.session.missingLabels.filterNot { it == current }
         _uiState.value = state.copy(
@@ -101,7 +108,7 @@ class DetailShotViewModel : ViewModel() {
     }
 
     fun goToPreviousStep() {
-        val state = _uiState.value
+        val state = _uiState.value ?: return
         val current = state.currentLabel ?: return
         val index = DetailLabel.ORDERED.indexOf(current)
         if (index <= 0) return
@@ -113,29 +120,16 @@ class DetailShotViewModel : ViewModel() {
 
     /** Jump back to one specific label from the review screen. */
     fun retake(label: DetailLabel) {
-        _uiState.value = _uiState.value.copy(
+        _uiState.value = _uiState.value?.copy(
             currentLabel = label,
             isRetaking = true,
             errorMessage = null
         )
     }
 
-    /**
-     * Discards the current pass and begins a fresh one. The ViewModel outlives a
-     * single walkaround (it is activity-scoped), so without this a second car
-     * would inherit the first car's photos and its already-complete state.
-     * Files from the previous session are left on disk — they belong to a
-     * finished capture log, not to this pass.
-     */
-    fun startNewSession() {
-        _uiState.value = DetailUiState(
-            session = DetailSession(sessionId = "details_${System.currentTimeMillis()}")
-        )
-    }
-
     /** Finish the wizard early — remaining labels stay in [DetailSession.missingLabels]. */
     fun finishWizard() {
-        _uiState.value = _uiState.value.copy(
+        _uiState.value = _uiState.value?.copy(
             currentLabel = null,
             isRetaking = false,
             errorMessage = null

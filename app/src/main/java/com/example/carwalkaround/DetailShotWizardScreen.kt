@@ -1,9 +1,6 @@
 package com.example.carwalkaround
 
-import android.content.Context
-import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -24,9 +21,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import java.io.File
 
 /**
  * Phase 1 guided detail-shot wizard: one label per step, one photo each, label
@@ -43,7 +38,11 @@ fun DetailShotWizardScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val uiState by viewModel.uiState.collectAsState()
+
+    // Null only before startNewSession has supplied a vehicle tag; the host
+    // always calls it before routing here, so this is a guard, not a state the
+    // user can see.
+    val uiState = viewModel.uiState.collectAsState().value ?: return
 
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
     var cameraError by remember { mutableStateOf<String?>(null) }
@@ -70,7 +69,7 @@ fun DetailShotWizardScreen(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 val previewView = PreviewView(ctx)
-                startDetailCamera(
+                startPhotoCamera(
                     context = ctx,
                     lifecycleOwner = lifecycleOwner,
                     previewView = previewView,
@@ -91,6 +90,12 @@ fun DetailShotWizardScreen(
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Which car these shots are being filed under, visible while they
+            // are taken rather than only afterwards in review.
+            VehicleTagHeader(tag = uiState.vehicleTag)
+
+            Spacer(modifier = Modifier.height(12.dp))
+
             StepStrip(
                 allLabels = DetailLabel.ORDERED,
                 capturedLabels = uiState.session.capturedLabels,
@@ -176,9 +181,13 @@ fun DetailShotWizardScreen(
                 onClick = {
                     val capture = imageCapture ?: return@ShutterButton
                     val capturedAt = System.currentTimeMillis()
-                    val outputFile = viewModel.outputFileFor(
+                    // Written under the tagged vehicle's folder, so the photo is
+                    // attributed by its location as well as by the in-memory
+                    // session — the latter does not survive a cold start.
+                    val outputFile = VehicleStorage.detailShotFile(
+                        context = context,
+                        tagId = uiState.vehicleTag.tagId,
                         label = currentLabel,
-                        parentDir = context.getExternalFilesDir(null) ?: context.filesDir,
                         capturedAt = capturedAt
                     )
                     isCapturing = true
@@ -309,81 +318,5 @@ private fun DetailFramingOverlay(modifier: Modifier = Modifier) {
     }
 }
 
-// --- CameraX wiring ---
-
-/**
- * Binds Preview + ImageCapture once for the whole wizard. Stepping between
- * labels only swaps overlay text, so there is no reason to rebind — a rebind
- * blanks the preview and re-runs camera init on every step.
- *
- * @param onError camera configuration failures are surfaced to the UI rather
- *        than thrown out of a main-executor callback, which would take the
- *        process down. Same reasoning as [startCamera] in OrbitCaptureScreen.
- */
-private fun startDetailCamera(
-    context: Context,
-    lifecycleOwner: androidx.lifecycle.LifecycleOwner,
-    previewView: PreviewView,
-    onImageCaptureReady: (ImageCapture) -> Unit,
-    onError: (String) -> Unit
-) {
-    val cameraProviderFuture = androidx.camera.lifecycle.ProcessCameraProvider.getInstance(context)
-    cameraProviderFuture.addListener({
-        try {
-            val cameraProvider = cameraProviderFuture.get()
-
-            val preview = androidx.camera.core.Preview.Builder().build().also {
-                it.setSurfaceProvider(previewView.surfaceProvider)
-            }
-
-            // VIN plates, DOT codes and window-sticker text all have to stay
-            // legible in review, so this trades shutter latency for quality.
-            val imageCapture = ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-                .build()
-
-            cameraProvider.unbindAll()
-            cameraProvider.bindToLifecycle(
-                lifecycleOwner,
-                CameraSelector.DEFAULT_BACK_CAMERA,
-                preview,
-                imageCapture
-            )
-            onImageCaptureReady(imageCapture)
-        } catch (e: Exception) {
-            onError("Camera unavailable: ${e.message ?: e::class.java.simpleName}")
-        }
-    }, ContextCompat.getMainExecutor(context))
-}
-
-/**
- * @param onSaved fires once the JPEG is fully written — only then is
- *        [outputFile] decodable by the review screen.
- * Both callbacks arrive on the main executor.
- */
-private fun takePhoto(
-    context: Context,
-    imageCapture: ImageCapture,
-    outputFile: File,
-    onSaved: () -> Unit,
-    onError: (String) -> Unit
-) {
-    val outputOptions = ImageCapture.OutputFileOptions.Builder(outputFile).build()
-
-    imageCapture.takePicture(
-        outputOptions,
-        ContextCompat.getMainExecutor(context),
-        object : ImageCapture.OnImageSavedCallback {
-            override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                onSaved()
-            }
-
-            override fun onError(exception: ImageCaptureException) {
-                onError(
-                    exception.message
-                        ?: "Photo failed to save (error ${exception.imageCaptureError})."
-                )
-            }
-        }
-    )
-}
+// Camera binding and shutter live in PhotoCapture.kt — shared with
+// VinCaptureScreen so the two cannot drift on capture mode or output handling.

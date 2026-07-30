@@ -52,16 +52,22 @@ fun nextLabelAfter(checkpoints: List<Checkpoint>): OrbitLabel? {
 /**
  * Immutable snapshot of one completed orbit recording pass, handed to the
  * review screen once the video file is finalized.
+ *
+ * @param vehicleTag the VIN capture this recording belongs to. Required for the
+ *        same reason as [DetailSession.vehicleTag]: an orbit video that does not
+ *        know its vehicle is unattributable footage.
  */
 data class OrbitSession(
+    val vehicleTag: VehicleTag,
     val videoFilePath: String,
     val checkpoints: List<Checkpoint> = emptyList()
 ) {
     /**
-     * Stable per-session identifier, derived from the timestamped video file
+     * Stable per-recording identifier, derived from the timestamped video file
      * name (`orbit_<millis>.mp4` -> `orbit_<millis>`). Extracted frames are
-     * namespaced under this so a second walkaround cannot overwrite the stills
-     * from the first — the label alone is not unique across sessions.
+     * namespaced under this *within* the vehicle's folder, so a second
+     * walkaround of the same car cannot overwrite the stills from the first —
+     * the label alone is not unique across recordings.
      */
     val sessionId: String
         get() = File(videoFilePath).nameWithoutExtension

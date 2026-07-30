@@ -48,14 +48,24 @@ class OrbitCaptureViewModel : ViewModel() {
     val uiState: StateFlow<OrbitUiState> = _uiState.asStateFlow()
 
     private var videoFilePath: String? = null
+
+    /**
+     * The vehicle this recording is being filed under, captured at record time
+     * so the finished [OrbitSession] carries it. Held here rather than passed to
+     * [onRecordingStopped] because the tag is fixed the moment recording starts:
+     * a walkaround cannot change which car it is of halfway through.
+     */
+    private var vehicleTag: VehicleTag? = null
+
     private var lastCheckpointElapsedMs: Long = 0L
 
     /** Elapsed-ms deadline until which a SLOW_DOWN hint stays on screen. */
     private var slowDownHintUntilMs: Long = 0L
 
     /** Call once CameraX has started writing to [videoFilePath]. */
-    fun onRecordingStarted(videoFilePath: String) {
+    fun onRecordingStarted(videoFilePath: String, vehicleTag: VehicleTag) {
         this.videoFilePath = videoFilePath
+        this.vehicleTag = vehicleTag
         lastCheckpointElapsedMs = 0L
         slowDownHintUntilMs = 0L
         _uiState.value = OrbitUiState(
@@ -148,8 +158,13 @@ class OrbitCaptureViewModel : ViewModel() {
      */
     fun onRecordingStopped(): OrbitSession? {
         val path = videoFilePath ?: return null
+        val tag = vehicleTag ?: return null
         val state = _uiState.value
         _uiState.value = state.copy(isRecording = false)
-        return OrbitSession(videoFilePath = path, checkpoints = state.checkpoints)
+        return OrbitSession(
+            vehicleTag = tag,
+            videoFilePath = path,
+            checkpoints = state.checkpoints
+        )
     }
 }

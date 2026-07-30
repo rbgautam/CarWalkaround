@@ -1,7 +1,5 @@
 package com.example.carwalkaround
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -17,11 +15,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-
-/** Longest edge, in pixels, that a review thumbnail is decoded at. */
-private const val THUMBNAIL_MAX_EDGE = 1024
 
 /**
  * Phase 1 review/retake screen: every detail label with its captured photo, or a
@@ -50,6 +43,9 @@ fun DetailReviewScreen(
                     text = "Detail shots review",
                     style = MaterialTheme.typography.headlineSmall
                 )
+                Spacer(modifier = Modifier.height(12.dp))
+                VehicleTagHeader(tag = session.vehicleTag)
+                Spacer(modifier = Modifier.height(12.dp))
                 Text(
                     text = "${session.shots.size} of ${DetailLabel.ORDERED.size} captured",
                     style = MaterialTheme.typography.bodyMedium,
@@ -155,43 +151,5 @@ private fun DetailShotCard(
     }
 }
 
-/**
- * Decodes [path] down to a thumbnail off the main thread.
- *
- * Full-resolution capture output is easily 12MP, which is ~48MB once expanded to
- * ARGB_8888 — decoding eight of those at full size to fill a scrolling list is a
- * dependable OutOfMemoryError. Keying on the path is safe here because a retake
- * always writes a *new* timestamped file (see
- * [DetailShotViewModel.outputFileFor]), so a replaced photo cannot reuse a
- * cached key.
- */
-@Composable
-private fun rememberThumbnail(path: String): Bitmap? {
-    return produceState<Bitmap?>(initialValue = null, key1 = path) {
-        value = withContext(Dispatchers.IO) { decodeSampled(path, THUMBNAIL_MAX_EDGE) }
-    }.value
-}
-
-/**
- * Two-pass decode: the first pass reads only the JPEG header for its dimensions
- * (inJustDecodeBounds allocates no pixels), the second decodes at a power-of-two
- * reduction just large enough to cover [maxEdge].
- */
-private fun decodeSampled(path: String, maxEdge: Int): Bitmap? {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeFile(path, bounds)
-    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-
-    var sampleSize = 1
-    while (
-        bounds.outWidth / (sampleSize * 2) >= maxEdge ||
-        bounds.outHeight / (sampleSize * 2) >= maxEdge
-    ) {
-        sampleSize *= 2
-    }
-
-    return BitmapFactory.decodeFile(
-        path,
-        BitmapFactory.Options().apply { inSampleSize = sampleSize }
-    )
-}
+// Thumbnail decoding lives in PhotoCapture.kt — shared with the VIN screen's
+// confirm step and the VehicleTagHeader.

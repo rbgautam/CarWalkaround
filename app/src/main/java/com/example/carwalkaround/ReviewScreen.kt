@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,6 +15,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -26,7 +28,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import java.io.File
 
 /**
  * Runs [FrameExtractor.extractCheckpointFrames] against the finished session and
@@ -43,7 +44,13 @@ fun ReviewScreen(
     var extracted by remember { mutableStateOf<OrbitSession?>(null) }
 
     LaunchedEffect(session.videoFilePath) {
-        val outputDir = File(context.getExternalFilesDir(null), "frames/${session.sessionId}")
+        // Extracted stills land inside the tagged vehicle's folder, so a frame
+        // is attributable to a car by its path alone.
+        val outputDir = VehicleStorage.framesDir(
+            context = context,
+            tagId = session.vehicleTag.tagId,
+            sessionId = session.sessionId
+        )
         extracted = FrameExtractor.extractCheckpointFrames(session, outputDir)
     }
 
@@ -69,10 +76,14 @@ fun ReviewScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            Text(
-                text = "Walkaround review",
-                style = MaterialTheme.typography.headlineSmall
-            )
+            Column {
+                Text(
+                    text = "Walkaround review",
+                    style = MaterialTheme.typography.headlineSmall
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                VehicleTagHeader(tag = done.vehicleTag)
+            }
         }
         items(done.checkpoints) { checkpoint ->
             CheckpointCard(checkpoint)

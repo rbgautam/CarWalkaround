@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -31,8 +33,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
  * Single-activity host. Compose handles all navigation via simple state:
  *   1. Gate on the CAMERA runtime permission (README calls this out as omitted
  *      from the capture "sketch" — it belongs at the app entry point).
- *   2. Once granted, show the [Screen.Home] chooser.
- *   3. Phase 1 — [DetailShotWizardScreen] -> [DetailReviewScreen].
+ *   2. Once granted, [VinCaptureScreen] establishes the [VehicleTag]. Nothing
+ *      else is reachable until it does, because every capture downstream is
+ *      filed under that tag and there is nowhere to put an untagged photo.
+ *   3. Then the [Screen.Home] chooser.
+ *   4. Phase 1 — [DetailShotWizardScreen] -> [DetailReviewScreen].
  *      Phase 2 — [OrbitCaptureScreen] -> [ReviewScreen].
  */
 class MainActivity : ComponentActivity() {
@@ -51,8 +56,17 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** Destinations in the capture flow. */
+/**
+ * Destinations in the capture flow.
+ *
+ * Note there is no untagged variant of [Home] or of either capture flow: the
+ * tag is carried by the app state that gates them, so "which vehicle" is never
+ * a question a downstream screen has to ask.
+ */
 private sealed interface Screen {
+    /** Entry point — photograph the VIN and tag everything that follows. */
+    data object VinCapture : Screen
+
     data object Home : Screen
 
     /** Phase 1: one-photo-per-label detail wizard. */
@@ -75,7 +89,12 @@ private fun AppRoot() {
         )
     }
 
-    var screen by remember { mutableStateOf<Screen>(Screen.Home) }
+    var screen by remember { mutableStateOf<Screen>(Screen.VinCapture) }
+
+    // The active vehicle. Null only before the first VIN photo; every screen
+    // past the VIN step reads it, which is why it is hoisted here rather than
+    // threaded through as a navigation argument on each destination.
+    var vehicleTag by remember { mutableStateOf<VehicleTag?>(null) }
 
     // Hoisted to the host, not owned by the wizard screen: a retake navigates
     // away to review and back again, and a screen-scoped ViewModel would be
@@ -91,13 +110,38 @@ private fun AppRoot() {
         return
     }
 
+    // Combining the two conditions makes "past the VIN step but untagged"
+    // unrepresentable, rather than something the destinations below have to
+    // defend against individually.
+    val tag = vehicleTag
+    if (tag == null || screen == Screen.VinCapture) {
+        VinCaptureScreen(
+            onTagged = { newTag ->
+                vehicleTag = newTag
+                screen = Screen.Home
+            }
+        )
+        return
+    }
+
     when (val current = screen) {
+        Screen.VinCapture -> Unit // handled above
+
         Screen.Home -> HomeScreen(
+            vehicleTag = tag,
             onStartDetailShots = {
-                detailViewModel.startNewSession()
+                detailViewModel.startNewSession(tag)
                 screen = Screen.DetailWizard
             },
-            onStartOrbit = { screen = Screen.OrbitCapture }
+            onStartOrbit = { screen = Screen.OrbitCapture },
+            onChangeVehicle = {
+                // Clearing the tag is what sends the user back to the VIN step;
+                // the guard above does the routing. Leaving the previous
+                // vehicle's files on disk is intentional — they are a finished
+                // capture log under their own folder, not scratch data.
+                vehicleTag = null
+                screen = Screen.VinCapture
+            }
         )
 
         Screen.DetailWizard -> DetailShotWizardScreen(
@@ -117,6 +161,7 @@ private fun AppRoot() {
         )
 
         Screen.OrbitCapture -> OrbitCaptureScreen(
+            vehicleTag = tag,
             onSessionFinished = { session -> screen = Screen.OrbitReview(session) }
         )
 
@@ -129,8 +174,10 @@ private fun AppRoot() {
 
 @Composable
 private fun HomeScreen(
+    vehicleTag: VehicleTag,
     onStartDetailShots: () -> Unit,
-    onStartOrbit: () -> Unit
+    onStartOrbit: () -> Unit,
+    onChangeVehicle: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -146,8 +193,15 @@ private fun HomeScreen(
         Text(
             text = "Capture the exterior in two passes.",
             style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.padding(top = 8.dp, bottom = 32.dp)
+            modifier = Modifier.padding(top = 8.dp, bottom = 20.dp)
         )
+
+        // The tag is offered for change only here. Mid-flow it is display-only:
+        // swapping vehicles with half a session captured would leave shots
+        // filed under a car they are not of.
+        VehicleTagHeader(tag = vehicleTag, onChangeVehicle = onChangeVehicle)
+
+        Spacer(modifier = Modifier.height(24.dp))
 
         Button(
             onClick = onStartDetailShots,

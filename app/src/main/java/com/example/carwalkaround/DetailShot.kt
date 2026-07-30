@@ -92,14 +92,20 @@ data class DetailShot(
 /**
  * Immutable snapshot of a detail-shot wizard pass.
  *
- * @param sessionId namespaces this pass's photos on disk. Two walkarounds of two
- *        different cars both produce an "ENGINE" shot, so the label alone is not
- *        a unique file name — same reasoning as [OrbitSession.sessionId].
+ * @param vehicleTag the VIN capture this pass belongs to. Non-null and required
+ *        at construction: two walkarounds of two different cars both produce an
+ *        "ENGINE" shot, so a session that does not know its vehicle cannot say
+ *        which car its photos document — a state worth making unrepresentable
+ *        rather than validating after the fact.
  */
 data class DetailSession(
-    val sessionId: String,
+    val vehicleTag: VehicleTag,
     val shots: List<DetailShot> = emptyList()
 ) {
+    /** Namespaces this pass's photos on disk; see [VehicleStorage]. */
+    val sessionId: String
+        get() = vehicleTag.tagId
+
     fun shotFor(label: DetailLabel): DetailShot? = shots.firstOrNull { it.label == label }
 
     /**

@@ -29,8 +29,14 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.io.File
 
+/**
+ * @param vehicleTag the VIN capture this recording is filed under. The video and
+ *        its extracted frames are written inside this vehicle's folder, and the
+ *        finished [OrbitSession] carries the tag through to review.
+ */
 @Composable
 fun OrbitCaptureScreen(
+    vehicleTag: VehicleTag,
     onSessionFinished: (OrbitSession) -> Unit,
     viewModel: OrbitCaptureViewModel = viewModel()
 ) {
@@ -79,14 +85,26 @@ fun OrbitCaptureScreen(
         // --- Static framing guide: horizontal height band + car silhouette ---
         FramingOverlay(modifier = Modifier.fillMaxSize())
 
-        // --- Top: pace hint banner ---
-        PaceBanner(
-            paceHint = uiState.paceHint,
-            isRecording = uiState.isRecording,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 24.dp)
-        )
+        // --- Top: vehicle tag before recording, pace hint during ---
+        // The two share this slot deliberately. Confirming the right car matters
+        // before the take; once walking, the pace hint is the only thing worth
+        // reading, and a second banner competing for that glance is noise.
+        if (uiState.isRecording) {
+            PaceBanner(
+                paceHint = uiState.paceHint,
+                isRecording = true,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 24.dp)
+            )
+        } else {
+            VehicleTagHeader(
+                tag = vehicleTag,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(16.dp)
+            )
+        }
 
         // --- Bottom: checkpoint progress strip + tap button ---
         Column(
@@ -123,16 +141,24 @@ fun OrbitCaptureScreen(
                 )
             } else if (!uiState.isRecording) {
                 Button(onClick = {
-                    val outputFile = File(
-                        context.getExternalFilesDir(null),
-                        "orbit_${System.currentTimeMillis()}.mp4"
+                    // Written inside the tagged vehicle's folder, alongside its
+                    // VIN photo and detail shots.
+                    val outputFile = VehicleStorage.orbitVideoFile(
+                        context = context,
+                        tagId = vehicleTag.tagId,
+                        startedAt = System.currentTimeMillis()
                     )
                     errorMessage = null
                     activeRecording = startRecording(
                         context = context,
                         videoCapture = videoCapture,
                         outputFile = outputFile,
-                        onStarted = { viewModel.onRecordingStarted(outputFile.absolutePath) },
+                        onStarted = {
+                            viewModel.onRecordingStarted(
+                                videoFilePath = outputFile.absolutePath,
+                                vehicleTag = vehicleTag
+                            )
+                        },
                         onFinalized = { error ->
                             isFinalizing = false
                             activeRecording = null
