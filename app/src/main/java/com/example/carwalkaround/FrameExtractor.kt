@@ -21,7 +21,10 @@ object FrameExtractor {
      * @param outputDir directory to write extracted frame JPEGs into. Must be
      *                  session-scoped (see [OrbitSession.sessionId]); frame file
      *                  names are label-derived and collide across sessions.
-     * @return the same session, with each checkpoint's frameUri populated.
+     * @return a *new* session whose checkpoints carry their frameUri. Returning
+     *         a new instance (rather than mutating the one passed in) is what
+     *         lets Compose see the change — an identical reference would be
+     *         skipped by snapshot equality even though its contents differ.
      */
     suspend fun extractCheckpointFrames(
         session: OrbitSession,
@@ -30,23 +33,24 @@ object FrameExtractor {
         if (!outputDir.exists()) outputDir.mkdirs()
 
         val retriever = MediaMetadataRetriever()
-        try {
+        val extracted = try {
             retriever.setDataSource(session.videoFilePath)
 
-            for (checkpoint in session.checkpoints) {
-                val frameUri = extractSingleFrame(
-                    retriever = retriever,
-                    timestampMs = checkpoint.timestampMs,
-                    label = checkpoint.label,
-                    outputDir = outputDir
+            session.checkpoints.map { checkpoint ->
+                checkpoint.copy(
+                    frameUri = extractSingleFrame(
+                        retriever = retriever,
+                        timestampMs = checkpoint.timestampMs,
+                        label = checkpoint.label,
+                        outputDir = outputDir
+                    )
                 )
-                checkpoint.frameUri = frameUri
             }
         } finally {
             retriever.release()
         }
 
-        session
+        session.copy(checkpoints = extracted)
     }
 
     /**

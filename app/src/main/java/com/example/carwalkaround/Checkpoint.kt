@@ -27,20 +27,35 @@ enum class CheckpointSource { MANUAL_TAP, AUTO_TIMER, AUTO_HEADING }
  * One captured checkpoint: which label, at what point in the recording (ms from
  * the start of the video file), and how it was triggered. frameUri is filled in
  * after extraction (§ FrameExtractor).
+ *
+ * Immutable by design: checkpoints are held in Compose-observed state, and an
+ * in-place `var` write is invisible to recomposition. Update via [copy] and
+ * replace the containing list instead.
  */
 data class Checkpoint(
     val label: OrbitLabel,
     val timestampMs: Long,
     val source: CheckpointSource,
-    var frameUri: String? = null
+    val frameUri: String? = null
 )
 
 /**
- * Full state for one orbit recording pass.
+ * The first label not yet captured in [checkpoints], or null once all 8 are
+ * done. Shared by [OrbitSession] and the capture ViewModel so the "what's next"
+ * rule lives in exactly one place.
+ */
+fun nextLabelAfter(checkpoints: List<Checkpoint>): OrbitLabel? {
+    val doneLabels = checkpoints.mapTo(mutableSetOf()) { it.label }
+    return OrbitLabel.ORDERED.firstOrNull { it !in doneLabels }
+}
+
+/**
+ * Immutable snapshot of one completed orbit recording pass, handed to the
+ * review screen once the video file is finalized.
  */
 data class OrbitSession(
     val videoFilePath: String,
-    val checkpoints: MutableList<Checkpoint> = mutableListOf()
+    val checkpoints: List<Checkpoint> = emptyList()
 ) {
     /**
      * Stable per-session identifier, derived from the timestamped video file
@@ -52,10 +67,7 @@ data class OrbitSession(
         get() = File(videoFilePath).nameWithoutExtension
 
     val nextLabel: OrbitLabel?
-        get() {
-            val doneLabels = checkpoints.map { it.label }.toSet()
-            return OrbitLabel.ORDERED.firstOrNull { it !in doneLabels }
-        }
+        get() = nextLabelAfter(checkpoints)
 
     val isComplete: Boolean
         get() = checkpoints.size >= OrbitLabel.ORDERED.size
