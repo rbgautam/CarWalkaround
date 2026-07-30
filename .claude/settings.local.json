@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/Rahul/AppData/Local/Android/Sdk/platforms/**)",
+      "Read(//c/Users/Rahul/AppData/Local/Android/Sdk/build-tools/**)",
+      "Read(//c/Program Files/Android/Android Studio/jbr/bin/**)",
+      "Bash(\"/c/Program Files/Android/Android Studio/jbr/bin/java.exe\" -version)",
+      "Read(//c/Program Files/Android/Android Studio/plugins/**)",
+      "Read(//c/Program Files/Android/Android Studio/**)"
+    ]
+  }
+}

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base application theme. We use a Material3 no-action-bar theme because
+         all UI is drawn in Compose; the XML theme only styles the splash/system
+         chrome before Compose takes over. -->
+    <style name="Theme.CarWalkaround" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
